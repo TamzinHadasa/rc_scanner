@@ -5,11 +5,10 @@ logs/
 testing.ipynb
 
 __pycache__/
+venv/
+apicache-py3/
 .vscode/
 .mypy_cache/
-apicache-py3/
 
 pywikibot.lwp
 throttle.ctrl
-
-venv/
