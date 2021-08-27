@@ -1,0 +1,13 @@
+config.py
+logs/
+
+.pylintrc
+testing.ipynb
+
+__pycache__/
+.vscode/
+.mypy_cache/
+apicache-py3/
+
+pywikibot.lwp
+throttle.ctrl
