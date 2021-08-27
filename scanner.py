@@ -26,6 +26,7 @@ def run(verbose: bool = False) -> None:
     Arg:
       verbose:  A bool of whether to print events that don't match.
     """
+    os.makedirs("logs/backups/flagged_changes/")
     stream = EventStreams(streams=config.STREAMS)
     stream.register_filter(**config.FILTER)
 
@@ -66,13 +67,13 @@ def run(verbose: bool = False) -> None:
                     shutil.copy(
                         "logs/flagged_changes.json",
                         ("logs/backups/flagged_changes/"
-                         f"{dt.datetime.now():%Y-%m-%d}.json")
+                         f"{dt.datetime.now()}.json")
                     )
                     data = []
                 data.append({'change': change,
                              'log': {'folder': folder,
                                      'file': filename}})
-                assert data
+                assert data  # Something is terribly wrong.
                 json.dump(data, f, indent=4)
 
 
