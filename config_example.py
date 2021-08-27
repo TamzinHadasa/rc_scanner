@@ -24,4 +24,13 @@ FILTER = {
     # not listed there.
     'namespace': 0
 }
+SETTINGS = {
+    'edit_count': 0,  # Match users with less than this many edits. 0 to disable
+    'log_level': 0,  # 0|1|2
+    'user_props': 'blockinfo|groups|editcount',  # User properties to return
+    'log_dir': 'logs',  # Main log directory
+    'user_log_dir': 'backups/flagged_changes',  # ?
+    'flagged_changes_log': 'flagged_changes.json',  # ?
+    'revid_log': 'revids.txt'  # Not even used yet
+}
 STREAMS = ['recentchange', 'revision-create']
