@@ -43,15 +43,14 @@ def run(verbose: bool = False) -> None:
             print(message)
             folder = f"logs/{change['meta']['dt'][:10]}"
             filename = "{user} {revision[new]}".format(**change)
-            f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
             content = f"{message}\n\n{change}\n\n{text}"
             try:
-                with f:
-                    f.write(content)
+                f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
             except FileNotFoundError:
                 os.makedirs(folder)
-                with f:
-                    f.write(content)
+                f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
+            with f:
+                f.write(content)
 
 
 def get_text(revision: int) -> str:
