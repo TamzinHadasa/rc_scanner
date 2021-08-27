@@ -5,7 +5,11 @@ Flags matches in the CLI and logs them to a dated subfolder of `logs/`.
 Command-line arg:
   -v / --verbose:  Print all changes, even ones that don't match.
 """
+import datetime as dt
+import json
+from json.decoder import JSONDecodeError
 import os
+import shutil
 import sys
 
 from pywikibot.comms.eventstreams import EventStreams
@@ -41,6 +45,7 @@ def run(verbose: bool = False) -> None:
                        + ", ".join(f"`{r.pattern}`" for r in hits)
                        + ": " + change['meta']['uri'])
             print(message)
+
             folder = f"logs/{change['meta']['dt'][:10]}"
             filename = "{user} {revision[new]}".format(**change)
             content = f"{message}\n\n{change}\n\n{text}"
@@ -51,6 +56,24 @@ def run(verbose: bool = False) -> None:
                 f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
             with f:
                 f.write(content)
+
+            with open("logs/flagged_changes.json", 'w+') as f:
+                try:
+                    data = json.load(f)
+                except JSONDecodeError:
+                    # The file is probably empty, but in case it
+                    # isn't...
+                    shutil.copy(
+                        "logs/flagged_changes.json",
+                        ("logs/backups/flagged_changes/"
+                         f"{dt.datetime.now():%Y-%m-%d}.json")
+                    )
+                    data = []
+                data.append({'change': change,
+                             'log': {'folder': folder,
+                                     'file': filename}})
+                assert data
+                json.dump(data, f, indent=4)
 
 
 def get_text(revision: int) -> str:
