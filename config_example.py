@@ -24,13 +24,17 @@ FILTER = {
     # not listed there.
     'namespace': 0
 }
-SETTINGS = {
-    'edit_count': 0,  # Match users with less than this many edits. 0 to disable
-    'log_level': 0,  # 0|1|2
-    'user_props': 'blockinfo|groups|editcount',  # User properties to return
-    'log_dir': 'logs',  # Main log directory
-    'user_log_dir': 'backups/flagged_changes',  # ?
-    'flagged_changes_log': 'flagged_changes.json',  # ?
-    'revid_log': 'revids.txt'  # Not even used yet
-}
+
+# Skip users with more edits than this. `None` to disable.
+MAX_EDIT_COUNT = None
+# 0:  Log nothing.
+# 1:  Log revids to `REVID_LOG`.
+# 2:  Also log flagged changes to `FLAGGED_CHANGES`.
+# 3:  Also log content of flagged changes to dated subfolder
+#     of `LOG_DIR`.
+LOG_LEVEL = 3
+USER_PROPS = 'blockinfo|groups|editcount'  # User properties to return
+LOG_DIR = 'logs'  # Main log directory
+FLAGGED_CHANGES_LOG = 'flagged_changes.json'
+REVID_LOG = 'revids.txt'
 STREAMS = ['recentchange', 'revision-create']

@@ -5,14 +5,11 @@ Flags matches in the CLI and logs them to a dated subfolder of `logs/`.
 Command-line arg:
   -v / --verbose:  Print all changes, even ones that don't match.
 """
-import datetime as dt
 import json
-import os
-from re import T
-import shutil
-import sys
 from json.decoder import JSONDecodeError
-from pathlib import Path
+import pathlib
+import sys
+from typing import Any, Optional
 
 import requests
 from pywikibot.comms.eventstreams import EventStreams
@@ -20,9 +17,6 @@ from pywikibot.comms.eventstreams import EventStreams
 import config
 
 _API = f"https://{config.SITE}/w/api.php?"
-_EDITCOUNT = config.SETTINGS['edit_count']
-_LOGLEVEL = config.SETTINGS['log_level']
-_LOGDIR = config.SETTINGS['log_dir']
 
 
 def run(verbose: bool = False) -> None:
@@ -31,177 +25,91 @@ def run(verbose: bool = False) -> None:
     Arg:
       verbose:  A bool of whether to print events that don't match.
     """
+    make_dirs()
     stream = EventStreams(streams=config.STREAMS)
     stream.register_filter(**config.FILTER)
 
+    print('Current settings:')
     if verbose:
-        print('Current settings:')
         print('Verbose -> True')
-        for setting in config.SETTINGS:
-            print(setting, '->', config.SETTINGS[setting])
-        print('\n')
+    print('\n'.join(f"{k} = {v}" for k, v in vars(config).items()
+                    if k.upper() == k))
 
-    if _LOGLEVEL >= 3:
-        user_logging_enabled = True
-        flagged_changes_enabled = True
-        revid_logging_enabled = True
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['user_log_dir']
-        ).mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['flagged_changes_log']
-        ).touch(
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR
-        ).mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['revid_log']
-        ).touch(
-            exist_ok=True
-        )
-    elif _LOGLEVEL >= 2:
-        flagged_changes_enabled = True
-        revid_logging_enabled = True
-        Path(
-            _LOGDIR
-        ).mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['flagged_changes_log']
-        ).touch(
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR
-        ).mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['revid_log']
-        ).touch(
-            exist_ok=True
-        )
-    elif _LOGLEVEL >= 1:
-        revid_logging_enabled = True
-        Path(
-            _LOGDIR
-        ).mkdir(
-            parents=True,
-            exist_ok=True
-        )
-        Path(
-            _LOGDIR,
-            '/',
-            config.SETTINGS['revid_log']
-        ).touch(
-            exist_ok=True
-        )
-    else:
-        user_logging_enabled = False
-        flagged_changes_enabled = False
-        revid_logging_enabled = False
+    if config.LOG_LEVEL > 3:
+        raise ValueError("LOG_LEVEL must be between 0 and 3 inclusive.")
+    revid_logging_enabled = config.LOG_LEVEL >= 1
+    flagged_changes_enabled = config.LOG_LEVEL >= 2
+    content_logging_enabled = config.LOG_LEVEL == 3
 
-    # Inform user we are now waiting..
-    print('Waiting for first edit..')
+    print('Waiting for first edit.')
 
     for change in stream:
         user = get_user(change['user'])
 
-        # If edit count filter is disabled, or if less than filter...
-        if _EDITCOUNT == 0 or user['editcount'] < _EDITCOUNT:
+        if count_check(user):
             text = get_text(change['revision']['new'])
-            hits = []
-            for r in config.REGEXES:
-                if r.search(text):
-                    hits.append(r)
+            hits = [r for r in config.REGEXES if r.search(text)]
             if verbose or hits:
                 print('{user} {verb} "{title}" at {meta[dt]}.'
-                    .format(verb=change['type'].removesuffix("e") + "ed",
-                            **change))
+                      .format(verb=change['type'].removesuffix("e") + "ed",
+                              **change))
             if hits:
                 message = ("***MATCH*** with regex"
-                        + ("es " if len(hits) > 1 else " ")
-                        + ", ".join(f"`{r.pattern}`" for r in hits)
-                        + ": " + change['meta']['uri'])
+                           + ("es " if len(hits) > 1 else " ")
+                           + ", ".join(f"`{r.pattern}`" for r in hits)
+                           + ": " + change['meta']['uri'])
                 print(message)
 
-                folder = f"{_LOGDIR}/{config.SETTINGS['user_log_dir']}/{change['meta']['dt'][:10]}"
-                new_revision = "{revision[new]}".format(**change)
+                folder = f"{config.LOG_DIR}/{change['meta']['dt'][:10]}"
+                new_revision = change['revision']['new']
                 username = change['user']
-                # Colons are invalid in most filenames
+                # Colons are invalid in most filenames.
                 filename = f"{username}_{new_revision}".replace(":", "-")
-                content = f"{message}\n\n{change}\n\n{text}"
 
                 if revid_logging_enabled:
-                    with open(
-                        f"{_LOGDIR}/{config.SETTINGS['revid_log']}",
-                        "a",
-                        encoding='utf-8'
-                    ) as f:
-                        f.write(f"{new_revision}\n")
-
-                if user_logging_enabled:
-                    try:
-                        f = open(f"/{filename}", 'w+', encoding='utf-8')
-                    except FileNotFoundError:
-                        Path(folder).mkdir(parents=True, exist_ok=True)
-                        f = open(f"/{filename}", 'w+', encoding='utf-8')
-                    with f:
-                        f.write(content)
-                
+                    log_revid(new_revision)
+                if content_logging_enabled:
+                    log_content(folder,
+                                filename,
+                                f"{message}\n\n{change}\n\n{text}")
                 if flagged_changes_enabled:
-                    with open(
-                        f"{_LOGDIR}/{config.SETTINGS['flagged_changes_log']}",
-                        'r',
-                        encoding='utf-8'
-                    ) as flaglog:
-                        try:
-                            data = json.load(flaglog)
-                        except JSONDecodeError:
-                            # No safeguards here
-                            if verbose:
-                                print(f"Failed to read {_LOGDIR}/{config.SETTINGS['flagged_changes_log']}")
-                                if yesno("Reset data and continue") is False:
-                                    exit()
-                            data = []
-                        
-                        data.append({'change': change,
-                                    'log': {'folder': folder,
-                                            'file': filename}})
-                        assert data  # Something is terribly wrong.
+                    if content_logging_enabled:
+                        log_flagged_change(change, folder, filename)
+                    else:
+                        log_flagged_change(change)
+        elif verbose:
+            print(f"Skipping - edit count was {user['editcount']} > "
+                  + str(config.MAX_EDIT_COUNT))
 
-                        # Now "close and flush", and open for writing
 
-                    with open(
-                        f"{_LOGDIR}/{config.SETTINGS['flagged_changes_log']}",
-                        'w',
-                        encoding='utf-8'
-                    ) as flaglog:
-                        json.dump(data, flaglog, indent=4)
-        else:
-            if verbose:
-                print(f"Skipping - edit count was {user['editcount']} > {_EDITCOUNT}")
+def make_dirs() -> None:
+    """Make the necessary directories and files if they don't exist."""
+    if config.LOG_LEVEL >= 1:
+        pathlib.Path(config.LOG_DIR).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(
+            config.LOG_DIR, config.REVID_LOG
+        ).touch(exist_ok=True)
+    else:
+        return
+    if config.LOG_LEVEL >= 2:
+        pathlib.Path(config.LOG_DIR).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(
+            config.LOG_DIR, config.FLAGGED_CHANGES_LOG
+        ).touch(exist_ok=True)
+
+
+# Avoid having to check `config.MIN_EDIT_COUNT` on every loop.
+def count_check(user: dict[str, Any]) -> bool:
+    """Compare an e"""
+    if config.MAX_EDIT_COUNT is None:
+        return True
+    try:
+        return user['editcount'] < config.MAX_EDIT_COUNT
+    # Trying to figure out why this happened once.  Will replace with
+    # proper error handling once it's clear why.
+    except KeyError:
+        print(user)
+        raise
 
 
 def get_text(revision: int) -> str:
@@ -220,31 +128,99 @@ def get_text(revision: int) -> str:
     r = requests.get(url=_API, params=params)
     try:
         return r.json()['parse']['wikitext']['*']
+    # Trying to figure out why this happened once.  Will replace with
+    # proper error handling once it's clear why.
     except KeyError:
         print(r.json())
         raise
 
 
-def get_user(username: str) -> dict:
+def get_user(username: str) -> dict[str, Any]:
     """Get a user
 
     Arg:
       username:  A str of a username
 
     Returns:
-      dict
+      A dict of user attributes
     """
-    params: dict[str, str | int] = {'format': 'json',
-                                    'action': 'query',
-                                    'list': 'users',
-                                    'ususers': username,
-                                    'usprop': config.SETTINGS['user_props']}
+    params: dict[str, str] = {'format': 'json',
+                              'action': 'query',
+                              'list': 'users',
+                              'ususers': username,
+                              'usprop': config.USER_PROPS}
     r = requests.get(url=_API, params=params)
     try:
         return r.json()['query']['users'][0]
+    # Trying to figure out why this happened once.  Will replace with
+    # proper error handling once it's clear why.
     except KeyError:
         print(r.json())
         raise
+
+
+def log_revid(revid: int) -> None:
+    """Log a revision ID to the revid log.
+
+    Arg:
+      revid:  An int of a MediaWiki olid.
+    """
+    with open(
+        f"{config.LOG_DIR}/{config.REVID_LOG}",
+        "a",
+        encoding='utf-8'
+    ) as f:
+        f.write(f"{revid}\n")
+
+
+def log_content(folder: str, filename: str, content: str) -> None:
+    """Log a revision's content to a dated subfolder of `logs/`.
+
+    Args:
+      folder:  A str of the dated subfolder.
+      filename:  A str of the filename.
+      content:  A str of what to log.
+    """
+    try:
+        f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
+    except FileNotFoundError:
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+        f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
+    with f:
+        f.write(content)
+
+
+def log_flagged_change(change: dict[str, Any],
+                       folder: Optional[str] = None,
+                       filename: Optional[str] = None) -> None:
+    """Log that a change has been flagged.
+
+    Args:
+      folder:  A str of the dated subfolder.
+      filename:  A str of the filename.
+      change:  A dict of the change, taken from the EventStream.
+    """
+    if (folder is None) != (filename is None):
+        raise ValueError
+    filepath = f"{config.LOG_DIR}/{config.FLAGGED_CHANGES_LOG}"
+    with open(filepath, 'r', encoding='utf-8') as flaglog:
+        try:
+            data = json.load(flaglog)
+        except JSONDecodeError:
+            print(f"Failed to read {filepath}")
+            if not yesno("Reset data and continue"):
+                sys.exit()
+            data = []
+
+    entry = {'change': change}
+    if folder:
+        entry['log'] = {'folder': folder,
+                        'file': filename}
+    data.append(entry)
+
+    assert data  # Something is terribly wrong.
+    with open(filepath, 'w', encoding='utf-8') as flaglog:
+        json.dump(data, flaglog, indent=4)
 
 
 def yesno(question: str) -> bool:
@@ -259,11 +235,9 @@ def yesno(question: str) -> bool:
     prompt = f'{question} ? (y/n): '
     ans = input(prompt).strip().lower()
     if ans not in ['y', 'n']:
-        print(f'{ans} is invalid, please try again...')
+        print(f'{ans} is invalid.  Please try again.')
         return yesno(question)
-    if ans == 'y':
-        return True
-    return False
+    return ans == 'y'
 
 
 if __name__ == '__main__':
