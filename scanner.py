@@ -14,7 +14,7 @@ from typing import Any, Optional
 import requests
 from pywikibot.comms.eventstreams import EventStreams
 
-import config
+import config  # pylint: disable=import-error
 
 _API = f"https://{config.SITE}/w/api.php?"
 
