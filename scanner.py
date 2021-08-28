@@ -14,6 +14,7 @@ import typing
 from typing import Any, Optional, Tuple, TypedDict
 
 import requests
+from requests import ReadTimeout
 from pywikibot.comms.eventstreams import EventStreams
 
 import config  # pylint: disable=import-error
@@ -272,7 +273,7 @@ def yesno(question: str) -> bool:
     Returns:
       bool
     """
-    prompt = f'{question}: '
+    prompt = f'{question} '
     ans = input(prompt).strip().lower()
     if ans not in ('y', 'n'):
         print(f'{ans} is invalid.  Please try again.')
@@ -281,4 +282,11 @@ def yesno(question: str) -> bool:
 
 
 if __name__ == '__main__':
-    run('-v' in sys.argv or '--verbose' in sys.argv)
+    verbosity = '-v' in sys.argv or '--verbose' in sys.argv
+    try:
+        run(verbosity)
+    except ReadTimeout as e:
+        if yesno(f"ReadTimeout with message {e.args[0]}.  Restart?"):
+            run(verbosity)
+        else:
+            raise
