@@ -14,7 +14,7 @@ import typing
 from typing import Any, Optional, Tuple, TypedDict
 
 import requests
-from requests import ReadTimeout
+from requests import ConnectionError as RequestsConnectionError, ReadTimeout
 from pywikibot.comms.eventstreams import EventStreams
 
 import config  # pylint: disable=import-error
@@ -56,7 +56,7 @@ class Change(TypedDict):
     revision: dict[str, int]
 
 
-def run(verbose: bool = False) -> None:
+def run(verbose: bool) -> None:
     """Execute the script.
 
     Arg:
@@ -75,42 +75,59 @@ def run(verbose: bool = False) -> None:
         raise ValueError("LOG_LEVEL must be between 0 and 3 inclusive.")
     print('Waiting for first edit.')
 
-    for change in stream:
-        change = typing.cast(Change, change)
-        user = get_user(change['user'])
+    try:
+        for change in stream:
+            eval_change(typing.cast(Change, change), verbose)
+    except (RequestsConnectionError, ReadTimeout) as e:
+        print(f"{e.__class__.__name__}: {e.args[0]}")
+        if yesno("Restart?"):
+            run(verbose)
+        else:
+            print("Shutting down.")
+            sys.exit()
 
-        if count_check(user):
-            text = get_text(change['revision']['new'])
-            hits = [r for r in config.REGEXES if r.search(text)]
-            if verbose or hits:
-                print('{user} {verb} "{title}" at {meta[dt]}.'
-                      .format(verb=change['type'].removesuffix("e") + "ed",
-                              **change))
-            if hits:
-                message = ("***MATCH*** with regex"
-                           + ("es " if len(hits) > 1 else " ")
-                           + ", ".join(f"`{r.pattern}`" for r in hits)
-                           + ": " + change['meta']['uri'])
-                print(message)
 
-                folder = (f"{config.LOG_DIR}/{config.CHANGES_SUBDIR}/"
-                          + change['meta']['dt'][:10])
-                new_revision = change['revision']['new']
-                # Colons are invalid in most filenames.
-                filename = f"{change['user']}_{new_revision}".replace(":", "-")
+def eval_change(change: Change, verbose: bool) -> None:
+    """Parse a change and log it if applicable.
 
-                if config.LOG_LEVEL:
-                    log_revid(new_revision)
-                if config.LOG_LEVEL == 2:
-                    log_flagged_change(change)
-                elif config.LOG_LEVEL == 3:
-                    log_content(folder,
-                                filename,
-                                f"{message}\n\n{change}\n\n{text}")
-                    log_flagged_change(change, (folder, filename))
-        elif verbose:
-            print(f"Skipping - edit count was {user['editcount']} > "
-                  + str(config.MAX_EDIT_COUNT))
+    Args:
+      change:  A Change to evaluate.
+      verbose:  A bool of whether to print events that don't match.
+    """
+    user = get_user(change['user'])
+
+    if count_check(user):
+        text = get_text(change['revision']['new'])
+        hits = [r for r in config.REGEXES if r.search(text)]
+        if verbose or hits:
+            print('{user} {verb} "{title}" at {meta[dt]}.'
+                  .format(verb=change['type'].removesuffix("e") + "ed",
+                          **change))
+        if hits:
+            message = ("***MATCH*** with regex"
+                       + ("es " if len(hits) > 1 else " ")
+                       + ", ".join(f"`{r.pattern}`" for r in hits)
+                       + ": " + change['meta']['uri'])
+            print(message)
+
+            folder = (f"{config.LOG_DIR}/{config.CHANGES_SUBDIR}/"
+                      + change['meta']['dt'][:10])
+            new_revision = change['revision']['new']
+            # Colons are invalid in most filenames.
+            filename = f"{change['user']}_{new_revision}".replace(":", "-")
+
+            if config.LOG_LEVEL:
+                log_revid(new_revision)
+            if config.LOG_LEVEL == 2:
+                log_flagged_change(change)
+            elif config.LOG_LEVEL == 3:
+                log_content(folder,
+                            filename,
+                            f"{message}\n\n{change}\n\n{text}")
+                log_flagged_change(change, (folder, filename))
+    elif verbose:
+        print(f"Skipping - edit count was {user['editcount']} > "
+              + str(config.MAX_EDIT_COUNT))
 
 
 def make_dirs() -> None:
@@ -233,7 +250,7 @@ def log_content(folder: str, filename: str, content: str) -> None:
         f.write(content)
 
 
-def log_flagged_change(change: dict[str, Any],
+def log_flagged_change(change: Change,
                        changes_path: Optional[Tuple[str, str]] = None) -> None:
     """Log that a change has been flagged.
 
@@ -253,7 +270,7 @@ def log_flagged_change(change: dict[str, Any],
                 sys.exit()
             data = []
 
-    entry = {'change': change}
+    entry: dict[str, Any] = {'change': change}
     if changes_path:
         entry['log'] = {'folder': changes_path[0],
                         'file': changes_path[1]}
@@ -282,11 +299,4 @@ def yesno(question: str) -> bool:
 
 
 if __name__ == '__main__':
-    verbosity = '-v' in sys.argv or '--verbose' in sys.argv
-    try:
-        run(verbosity)
-    except ReadTimeout as e:
-        if yesno(f"ReadTimeout with message {e.args[0]}.  Restart?"):
-            run(verbosity)
-        else:
-            raise
+    run('-v' in sys.argv or '--verbose' in sys.argv)
