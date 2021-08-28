@@ -1,7 +1,6 @@
 config.py
 logs/
 
-.pylintrc
 testing.ipynb
 
 __pycache__/
