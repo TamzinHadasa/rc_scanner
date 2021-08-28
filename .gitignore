@@ -1,7 +1,6 @@
 config.py
 logs/
-
-testing.ipynb
+local/
 
 __pycache__/
 venv/

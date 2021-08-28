@@ -1,6 +1,7 @@
 """Scan an EventStream of RecentChanges for certain regexes.
 
-Flags matches in the CLI and logs them to a dated subfolder of `logs/`.
+Flags matches in the CLI and logs them to a dated subdirectory of
+the changes subdirectory.
 
 Command-line arg:
   -v / --verbose:  Print all changes, even ones that don't match.
@@ -9,7 +10,8 @@ import json
 from json.decoder import JSONDecodeError
 import pathlib
 import sys
-from typing import Any, Optional
+import typing
+from typing import Any, Optional, Tuple, TypedDict
 
 import requests
 from pywikibot.comms.eventstreams import EventStreams
@@ -17,6 +19,40 @@ from pywikibot.comms.eventstreams import EventStreams
 import config  # pylint: disable=import-error
 
 _API = f"https://{config.SITE}/w/api.php?"
+
+
+class Meta(TypedDict):
+    """Structure of Change.meta."""
+    domain: str
+    partition: int
+    uri: str
+    offset: int
+    topic: str
+    request_id: str
+    schema_uri: str
+    dt: str
+    id: str
+
+
+class Change(TypedDict):
+    """Structure of a change in the EventStream."""
+    comment: str
+    wiki: str
+    type: str
+    server_name: str
+    server_script_path: str
+    namespace: int
+    title: str
+    bot: bool
+    server_url: str
+    length: dict[str, int]
+    meta: Meta
+    user: str
+    timestamp: int
+    patrolled: bool
+    id: int
+    minor: bool
+    revision: dict[str, int]
 
 
 def run(verbose: bool = False) -> None:
@@ -34,16 +70,12 @@ def run(verbose: bool = False) -> None:
         print('Verbose -> True')
     print('\n'.join(f"{k} = {v}" for k, v in vars(config).items()
                     if k.upper() == k))
-
     if config.LOG_LEVEL > 3:
         raise ValueError("LOG_LEVEL must be between 0 and 3 inclusive.")
-    revid_logging_enabled = config.LOG_LEVEL >= 1
-    flagged_changes_enabled = config.LOG_LEVEL >= 2
-    content_logging_enabled = config.LOG_LEVEL == 3
-
     print('Waiting for first edit.')
 
     for change in stream:
+        change = typing.cast(Change, change)
         user = get_user(change['user'])
 
         if count_check(user):
@@ -60,23 +92,21 @@ def run(verbose: bool = False) -> None:
                            + ": " + change['meta']['uri'])
                 print(message)
 
-                folder = f"{config.LOG_DIR}/{change['meta']['dt'][:10]}"
+                folder = (f"{config.LOG_DIR}/{config.CHANGES_SUBDIR}/"
+                          + change['meta']['dt'][:10])
                 new_revision = change['revision']['new']
-                username = change['user']
                 # Colons are invalid in most filenames.
-                filename = f"{username}_{new_revision}".replace(":", "-")
+                filename = f"{change['user']}_{new_revision}".replace(":", "-")
 
-                if revid_logging_enabled:
+                if config.LOG_LEVEL:
                     log_revid(new_revision)
-                if content_logging_enabled:
+                if config.LOG_LEVEL == 2:
+                    log_flagged_change(change)
+                elif config.LOG_LEVEL == 3:
                     log_content(folder,
                                 filename,
                                 f"{message}\n\n{change}\n\n{text}")
-                if flagged_changes_enabled:
-                    if content_logging_enabled:
-                        log_flagged_change(change, folder, filename)
-                    else:
-                        log_flagged_change(change)
+                    log_flagged_change(change, (folder, filename))
         elif verbose:
             print(f"Skipping - edit count was {user['editcount']} > "
                   + str(config.MAX_EDIT_COUNT))
@@ -93,14 +123,26 @@ def make_dirs() -> None:
         return
     if config.LOG_LEVEL >= 2:
         pathlib.Path(config.LOG_DIR).mkdir(parents=True, exist_ok=True)
-        pathlib.Path(
-            config.LOG_DIR, config.FLAGGED_CHANGES_LOG
-        ).touch(exist_ok=True)
+        pathlib.Path(config.LOG_DIR,
+                     config.FLAGGED_CHANGES_LOG).touch(exist_ok=True)
+    if config.LOG_LEVEL >= 3:
+        pathlib.Path(config.LOG_DIR,
+                     config.CHANGES_SUBDIR).mkdir(parents=True, exist_ok=True)
 
 
-# Avoid having to check `config.MIN_EDIT_COUNT` on every loop.
+# Avoid having to check `config.MAX_EDIT_COUNT` on every loop.
 def count_check(user: dict[str, Any]) -> bool:
-    """Compare an e"""
+    """Compare an edit count to `config.MAX_EDIT_COUNT`, if specified.
+
+    If `config.MAX_EDIT_COUNT` is None, return True always.
+
+    Arg:
+      user:  A dict of user data drawn from the EventStream.
+
+    Returns:
+      A bool indicating whether the user's edit count was under the max,
+      or indicating that no max was specified.
+    """
     if config.MAX_EDIT_COUNT is None:
         return True
     try:
@@ -191,8 +233,7 @@ def log_content(folder: str, filename: str, content: str) -> None:
 
 
 def log_flagged_change(change: dict[str, Any],
-                       folder: Optional[str] = None,
-                       filename: Optional[str] = None) -> None:
+                       changes_path: Optional[Tuple[str, str]] = None) -> None:
     """Log that a change has been flagged.
 
     Args:
@@ -200,26 +241,25 @@ def log_flagged_change(change: dict[str, Any],
       filename:  A str of the filename.
       change:  A dict of the change, taken from the EventStream.
     """
-    if (folder is None) != (filename is None):
-        raise ValueError
-    filepath = f"{config.LOG_DIR}/{config.FLAGGED_CHANGES_LOG}"
-    with open(filepath, 'r', encoding='utf-8') as flaglog:
+    log_path = f"{config.LOG_DIR}/{config.FLAGGED_CHANGES_LOG}"
+    with open(log_path, 'r', encoding='utf-8') as flaglog:
         try:
             data = json.load(flaglog)
         except JSONDecodeError:
-            print(f"Failed to read {filepath}")
-            if not yesno("Reset data and continue"):
+            print(f"Failed to read {log_path}")
+            if not yesno("RESET ALL DATA? (y/n)  (If this is your first time "
+                         "running the Scanner at LOG_LEVEL 3, say 'y'.)"):
                 sys.exit()
             data = []
 
     entry = {'change': change}
-    if folder:
-        entry['log'] = {'folder': folder,
-                        'file': filename}
+    if changes_path:
+        entry['log'] = {'folder': changes_path[0],
+                        'file': changes_path[1]}
     data.append(entry)
 
-    assert data  # Something is terribly wrong.
-    with open(filepath, 'w', encoding='utf-8') as flaglog:
+    assert data, "Something is terribly wrong."
+    with open(log_path, 'w', encoding='utf-8') as flaglog:
         json.dump(data, flaglog, indent=4)
 
 
@@ -232,9 +272,9 @@ def yesno(question: str) -> bool:
     Returns:
       bool
     """
-    prompt = f'{question} ? (y/n): '
+    prompt = f'{question}: '
     ans = input(prompt).strip().lower()
-    if ans not in ['y', 'n']:
+    if ans not in ('y', 'n'):
         print(f'{ans} is invalid.  Please try again.')
         return yesno(question)
     return ans == 'y'

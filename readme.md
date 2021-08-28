@@ -12,6 +12,6 @@ file.
 
 ## Running
 
-Regex matches will be printed to the CLI and logged to a dated subfolder
-of `logs/`. Include the `-v` / `--verbose` flag when running the script
-to also print (but not log) non-matches.
+Regex matches will be printed to the CLI and logged to a dated
+subdirectory of the changes subdirectory. Include the `-v` / `--verbose`
+flag when running the script to also print (but not log) non-matches.
