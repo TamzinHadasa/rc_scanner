@@ -33,8 +33,9 @@ MAX_EDIT_COUNT = None
 # 3:  Also log content of flagged changes to dated subfolder
 #     of `LOG_DIR`.
 LOG_LEVEL = 3
-USER_PROPS = 'blockinfo|groups|editcount'  # User properties to return
-LOG_DIR = 'logs'  # Main log directory
+USER_PROPS = 'blockinfo|groups|editcount'  # User properties to return.
+LOG_DIR = 'logs'  # Main log directory.
+CHANGES_SUBDIR = 'changes'  # Directory for copies of changes.
 FLAGGED_CHANGES_LOG = 'flagged_changes.json'
 REVID_LOG = 'revids.txt'
 STREAMS = ['recentchange', 'revision-create']

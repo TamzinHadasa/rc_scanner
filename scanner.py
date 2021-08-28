@@ -17,7 +17,12 @@ import requests
 from requests import ConnectionError as RequestsConnectionError, ReadTimeout
 from pywikibot.comms.eventstreams import EventStreams
 
-import config  # pylint: disable=import-error
+try:
+    import config
+except ImportError:
+    # To allow for linting of the repo by Github Action, and to ensure
+    # through that that `config_example` is up to date.
+    import config_example as config  # type: ignore
 
 _API = f"https://{config.SITE}/w/api.php?"
 
