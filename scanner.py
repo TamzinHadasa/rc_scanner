@@ -182,7 +182,7 @@ def log_content(folder: str, filename: str, content: str) -> None:
       content:  A str of what to log.
     """
     try:
-        f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
+        f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')  # pylint: disable=consider-using-with
     except FileNotFoundError:
         pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
         f = open(f"{folder}/{filename}", 'w+', encoding='utf-8')
