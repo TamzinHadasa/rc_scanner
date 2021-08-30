@@ -122,7 +122,7 @@ def eval_change(change: Change, filter_: Filter, verbose: bool) -> None:
     api = filter_.apis[change['server_name']]
     editcount = get_editcount(api, change['user'])
 
-    if count_under_max(editcount):
+    if filter_.compare_count(editcount):
         text = get_text(api, change['revision']['new'])
         hits = filter_.search_regexes(text)
         if verbose or hits:
@@ -156,26 +156,7 @@ def eval_change(change: Change, filter_: Filter, verbose: bool) -> None:
                                    (folder, filename),
                                    filtername=filter_.name)
     elif verbose:
-        print(f"Skipping.  Edit count was {editcount} > "
-              + str(config.MAX_EDIT_COUNT))
-
-
-# Avoid having to check `config.MAX_EDIT_COUNT` on every loop.
-def count_under_max(editcount: int) -> bool:
-    """Compare an edit count to `config.MAX_EDIT_COUNT`, if specified.
-
-    If `config.MAX_EDIT_COUNT` is None, return True always.
-
-    Arg:
-      editcount:  A user's edit count.
-
-    Returns:
-      A bool indicating whether the user's edit count was under the max,
-      or indicating that no max was specified.
-    """
-    if config.MAX_EDIT_COUNT is None:
-        return True
-    return editcount < config.MAX_EDIT_COUNT
+        print(f"Skipping.  Edit count was {editcount} > {filter_.max_edits}.")
 
 
 def get_text(api: str, revision: int) -> str:

@@ -3,8 +3,6 @@ import re
 
 from classes import Filter
 
-# Skip users with more edits than this. `None` to disable.
-MAX_EDIT_COUNT = None
 # 0:  Log nothing.
 # 1:  Log revids to `REVID_LOG`.
 # 2:  Also log flagged changes to `FLAGGED_CHANGES`.
@@ -39,6 +37,8 @@ filters = {i.name: i for i in [
                       'bot': False,
                       'namespace': 2},  # `User:`
         streams=['recentchange', 'revision-create'],
+        # Skip users with more edits than this. None to disable.
+        max_edits=None,
         # List as many regexes as you want, although note that runtime
         # increases linearly with this list.  If a regex takes no flags,
         # use a 0 as the tuple's second value.

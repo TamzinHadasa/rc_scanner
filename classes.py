@@ -1,6 +1,6 @@
 """Holds classes for use elsewhere."""
 import re
-from typing import Any, TypedDict
+from typing import Any, Callable, Optional, TypedDict
 
 from pywikibot.comms.eventstreams import EventStreams
 
@@ -43,7 +43,7 @@ class Change(TypedDict):
     revision: dict[str, int]
 
 
-class Filter:
+class Filter:  # pylint: disable=too-many-instance-attributes
     """Object to filter the EventStream and its output.
 
     Attributes:
@@ -59,6 +59,7 @@ class Filter:
                  sites: list[str],
                  streamfilter: dict[str, Any],
                  streams: list[str],
+                 max_edits: Optional[int],
                  regexes: list[tuple[str, re.RegexFlag | int]]) -> None:
         """Initialize a Filter.
 
@@ -79,6 +80,12 @@ class Filter:
         self.name = name
         self.apis = {i: f"https://{i}/w/api.php?" for i in sites}
         streamfilter['server_name'] = sites
+        self.max_edits = max_edits
+        # Avoid checking if `max_edits` is None on every comparison.
+        self._compare_count = (lambda editcount: editcount <= self.max_edits)
+        self.compare_count: Callable[[int], bool] = (
+            (lambda x: True) if max_edits is None else self._compare_count
+        )
         self._streamfilter = streamfilter
         self._streams = streams
         self._regexes = [re.compile(i, flags=j) for i, j in regexes]
