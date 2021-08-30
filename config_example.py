@@ -1,29 +1,7 @@
-"""Configuration data for `scanner`.
-
-Modify as needed and then save as `config.py`.
-"""
+"""Configuration data for `scanner`."""
 import re
 
-# NOT including "https" etc.
-SITE = "en.wikipedia.org"
-# As many as you want, although note that runtime increases linearly
-# with this list.
-REGEXES = [re.compile(i, flags=j) for i, j in [
-    (r"\buserbox(e[ns])?\b", re.I),
-    (r"some other regex; use 0 for no flags", 0)
-]]
-# See <https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams>
-# and <https://doc.wikimedia.org/pywikibot/master/api_ref/pywikibot.comms.html#module-pywikibot.comms.eventstreams>
-# for more information on configuring FILTER and STREAMS.
-FILTER = {
-    'server_name': SITE,
-    'type': ('edit', 'create'),
-    'bot': False,
-    # <https://www.mediawiki.org/wiki/Help:Namespaces#Localisation> for
-    # namespace numbers, or your wiki's internal documentation for ones
-    # not listed there.
-    'namespace': 0
-}
+from classes import Filter
 
 # Skip users with more edits than this. `None` to disable.
 MAX_EDIT_COUNT = None
@@ -33,9 +11,41 @@ MAX_EDIT_COUNT = None
 # 3:  Also log content of flagged changes to dated subfolder
 #     of `LOG_DIR`.
 LOG_LEVEL = 3
-USER_PROPS = 'blockinfo|groups|editcount'  # User properties to return.
-LOG_DIR = 'logs'  # Main log directory.
-CHANGES_SUBDIR = 'changes'  # Directory for copies of changes.
+# Main log directory.
+LOG_DIR = 'logs'
+# Subdirectory of `LOG_DIR` for copies of changes.
+CHANGES_SUBDIR = 'changes'
+# File in `LOG_DIR` to list metadata about flagged changes in.
 FLAGGED_CHANGES_LOG = 'flagged_changes.json'
+# File in `REVID_LOG` to list flagged revids in.
 REVID_LOG = 'revids.txt'
-STREAMS = ['recentchange', 'revision-create']
+
+
+# See <https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams>
+# and <https://doc.wikimedia.org/pywikibot/master/api_ref/pywikibot.comms.html#module-pywikibot.comms.eventstreams>
+# for more information on configuring `sites`, `streamfilter`, and
+# `streams`.
+#
+# See <https://www.mediawiki.org/wiki/Help:Namespaces#Localisation> for
+# namespace numbers, or your wiki's internal documentation for ones
+# not listed there.
+filters = {i.name: i for i in [
+    # BEGIN FILTER LIST HERE.
+    Filter(
+        name='minors',
+        # Not including "https://"
+        sites=["en.wikipedia.org"],
+        streamfilter={'type': ('edit', 'create'),
+                      'bot': False,
+                      'namespace': 2},  # `User:`
+        streams=['recentchange', 'revision-create'],
+        # List as many regexes as you want, although note that runtime
+        # increases linearly with this list.  If a regex takes no flags,
+        # use a 0 as the tuple's second value.
+        regexes=[
+            (r"\buserbox(e[ns])?\b", re.I),
+            (r"some other regex; use 0 for no flags", 0)
+        ]
+    )
+    # END FILTER LIST HERE.
+]}

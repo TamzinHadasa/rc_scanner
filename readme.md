@@ -12,6 +12,9 @@ file.
 
 ## Running
 
-Regex matches will be printed to the CLI and logged to a dated
-subdirectory of the changes subdirectory. Include the `-v` / `--verbose`
-flag when running the script to also print (but not log) non-matches.
+`scanner.py <filtername> [-v / --verbose]`
+
+The filter name should be one listed in `config.filters`.  `-v` /
+`--verbose` instructs the program to print (but not log) non-matches.
+All matches will be printed to the command line, and will be logged in
+accordance with your `config.LOG_LEVEL`.
