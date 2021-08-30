@@ -23,7 +23,7 @@ except ImportError:
     # To allow for linting of the repo by Github Action, and to ensure
     # through that that `config_example` is up to date.
     import config_example as config  # type: ignore
-from classes import Change, Filter
+from classes import Change, Filter, QueryRaceCondition
 
 
 def get_sys_args() -> tuple[Filter, bool]:
@@ -68,7 +68,12 @@ def run(filter_: Filter, verbose: bool) -> None:
 
     try:
         for change in stream:
-            eval_change(typing.cast(Change, change), filter_, verbose)
+            try:
+                eval_change(typing.cast(Change, change), filter_, verbose)
+            except QueryRaceCondition as e:
+                print("A race condition occurred, likely due to a page being "
+                      "deleted before it could be queried. The API returned "
+                      "the following error message:\n", e.args[0])
     except (RequestsConnectionError, ReadTimeout) as e:
         print(f"{e.__class__.__name__}: {e.args[0]}")
         if yesno("Restart?"):
@@ -115,9 +120,9 @@ def eval_change(change: Change, filter_: Filter, verbose: bool) -> None:
       verbose:  A bool of whether to print events that don't match.
     """
     api = filter_.apis[change['server_name']]
-    user = get_editcount(api, change['user'])
+    editcount = get_editcount(api, change['user'])
 
-    if count_check(user):
+    if count_under_max(editcount):
         text = get_text(api, change['revision']['new'])
         hits = filter_.search_regexes(text)
         if verbose or hits:
@@ -151,18 +156,18 @@ def eval_change(change: Change, filter_: Filter, verbose: bool) -> None:
                                    (folder, filename),
                                    filtername=filter_.name)
     elif verbose:
-        print(f"Skipping.  Edit count was {user['editcount']} > "
+        print(f"Skipping.  Edit count was {editcount} > "
               + str(config.MAX_EDIT_COUNT))
 
 
 # Avoid having to check `config.MAX_EDIT_COUNT` on every loop.
-def count_check(user: dict[str, Any]) -> bool:
+def count_under_max(editcount: int) -> bool:
     """Compare an edit count to `config.MAX_EDIT_COUNT`, if specified.
 
     If `config.MAX_EDIT_COUNT` is None, return True always.
 
     Arg:
-      user:  A dict of user data drawn from the EventStream.
+      editcount:  A user's edit count.
 
     Returns:
       A bool indicating whether the user's edit count was under the max,
@@ -170,13 +175,7 @@ def count_check(user: dict[str, Any]) -> bool:
     """
     if config.MAX_EDIT_COUNT is None:
         return True
-    try:
-        return user['editcount'] < config.MAX_EDIT_COUNT
-    # Trying to figure out why this happened once.  Will replace with
-    # proper error handling once it's clear why.
-    except KeyError:
-        print(user)
-        raise
+    return editcount < config.MAX_EDIT_COUNT
 
 
 def get_text(api: str, revision: int) -> str:
@@ -196,11 +195,8 @@ def get_text(api: str, revision: int) -> str:
     r = requests.get(url=api, params=params)
     try:
         return r.json()['parse']['wikitext']['*']
-    # Trying to figure out why this happened once.  Will replace with
-    # proper error handling once it's clear why.
-    except KeyError:
-        print(r.json())
-        raise
+    except KeyError as e:
+        raise QueryRaceCondition(r.json()) from e
 
 
 def get_editcount(api: str, username: str) -> dict[str, Any]:
@@ -221,11 +217,8 @@ def get_editcount(api: str, username: str) -> dict[str, Any]:
     r = requests.get(url=api, params=params)
     try:
         return r.json()['query']['users'][0]['editcount']
-    # Trying to figure out why this happened once.  Will replace with
-    # proper error handling once it's clear why.
-    except KeyError:
-        print(r.json())
-        raise
+    except KeyError as e:
+        raise QueryRaceCondition(r.json()) from e
 
 
 def log_revid(revid: int) -> None:

@@ -5,6 +5,10 @@ from typing import Any, TypedDict
 from pywikibot.comms.eventstreams import EventStreams
 
 
+class QueryRaceCondition(Exception):
+    """Error for race conditions while querying the API."""
+
+
 class Meta(TypedDict):
     """Structure of Change.meta."""
     domain: str
