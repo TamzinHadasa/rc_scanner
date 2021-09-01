@@ -4,7 +4,12 @@ from typing import Any, Optional
 
 from pywikibot.comms.eventstreams import EventStreams
 
-import config
+try:
+    import config
+except ImportError:
+    # To allow for linting of the repo by Github Action, and to ensure
+    # through that that the example file is up to date.
+    from examples import config  # type: ignore
 from utils import ConfigError
 import flaglog
 
