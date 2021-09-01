@@ -7,12 +7,10 @@ Command-line args:
   filter:  The name of a Filter listed in `config.filters`.
   -v / --verbose:  Print all changes, even ones that don't match.
 """
-import json
-from json.decoder import JSONDecodeError
 import pathlib
 import sys
 import typing
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from requests import ConnectionError as RequestsConnectionError, ReadTimeout
@@ -21,12 +19,19 @@ try:
     import config
 except ImportError:
     # To allow for linting of the repo by Github Action, and to ensure
-    # through that that `config_example` is up to date.
-    import config_example as config  # type: ignore
-from classes import Change, Filter, QueryRaceCondition
+    # through that that the example file is up to date.
+    from examples import config
+try:
+    import filterlist
+except ImportError:
+    from examples import filterlist  # pylint: disable=ungrouped-imports
+import utils
+from utils import Change, QueryRaceCondition
+from filter_ import Filter
+import flaglog
 
 
-def get_sys_args() -> tuple[Filter, bool]:
+def _get_sys_args() -> tuple[Filter, bool]:
     """Get command line arguments.
 
     Returns:
@@ -36,7 +41,7 @@ def get_sys_args() -> tuple[Filter, bool]:
     """
     verbose = '-v' in sys.argv or '--verbose' in sys.argv
     try:
-        filter_ = config.filters[sys.argv[1]]
+        filter_ = filterlist.filterlist[sys.argv[1]]
     except IndexError:
         print("Error: No filter specified from `config.filters`.")
     except KeyError:
@@ -76,7 +81,7 @@ def run(filter_: Filter, verbose: bool) -> None:
                       "the following error message:\n", e.args[0])
     except (RequestsConnectionError, ReadTimeout) as e:
         print(f"{e.__class__.__name__}: {e.args[0]}")
-        if yesno("Restart?"):
+        if utils.yesno("Restart?"):
             run(filter_, verbose)
         else:
             print("Shutting down.")
@@ -105,6 +110,7 @@ def make_dirs(level: int = config.LOG_LEVEL) -> None:
             pathlib.Path(config.LOG_DIR).mkdir(parents=True, exist_ok=True)
             pathlib.Path(config.LOG_DIR,
                          config.FLAGGED_CHANGES_LOG).touch(exist_ok=True)
+            flaglog.init()
         case 3:
             pathlib.Path(config.LOG_DIR,
                          config.CHANGES_SUBDIR).mkdir(parents=True,
@@ -120,43 +126,53 @@ def eval_change(change: Change, filter_: Filter, verbose: bool) -> None:
       verbose:  A bool of whether to print events that don't match.
     """
     api = filter_.apis[change['server_name']]
-    editcount = get_editcount(api, change['user'])
+    username = change['user']
+    editcount = get_editcount(api, username)
+    if not filter_.count_under_max(editcount):
+        if verbose:
+            print(f"Skipping.  Edit count was {editcount} > "
+                  f"{filter_.max_edits}.")
+        return
+    if filter_.page_is_repeat(change['title']):
+        if verbose:
+            print("Skipping.  Page already in flagged changes log.")
+        return
 
-    if filter_.compare_count(editcount):
-        text = get_text(api, change['revision']['new'])
-        hits = filter_.search_regexes(text)
-        if verbose or hits:
-            print('{user} {verb} "{title}" at {meta[dt]}.'
-                  .format(verb=change['type'].removesuffix("e") + "ed",
-                          **change))
-        if hits:
-            message = ("***MATCH*** with regex"
-                       + ("es " if len(hits) > 1 else " ")
-                       + ", ".join(f"`{r.pattern}`" for r in hits)
-                       + ": " + change['meta']['uri'])
-            print(message)
+    text = get_text(api, change['revision']['new'])
+    hits = filter_.search_regexes(text)
+    if verbose or hits:
+        print('{user} {verb} "{title}" at {meta[dt]}.'
+              .format(verb=change['type'].removesuffix("e") + "ed",
+                      **change))
+    if hits:
+        message = ("***MATCH*** with regex"
+                   + ("es " if len(hits) > 1 else " ")
+                   + ", ".join(f"`{r.pattern}`" for r in hits)
+                   + ": " + change['meta']['uri'])
+        print(message)
 
-            folder = (f"{config.LOG_DIR}/{config.CHANGES_SUBDIR}/"
-                      + change['meta']['dt'][:10])
-            new_revision = change['revision']['new']
-            # Colons are invalid in most filenames.
-            filename = f"{change['user']}_{new_revision}".replace(":", "-")
-
-            if config.LOG_LEVEL:
-                log_revid(new_revision)
-            if config.LOG_LEVEL == 2:
-                log_flagged_change(change, filtername=filter_.name)
-            elif config.LOG_LEVEL == 3:
-                log_content(
-                    folder,
-                    filename,
-                    f"{filter_.name}\n\n{message}\n\n{change}\n\n{text}"
-                )
-                log_flagged_change(change,
-                                   (folder, filename),
-                                   filtername=filter_.name)
-    elif verbose:
-        print(f"Skipping.  Edit count was {editcount} > {filter_.max_edits}.")
+        folder = (f"{config.LOG_DIR}/{config.CHANGES_SUBDIR}/"
+                  + change['meta']['dt'][:10])
+        new_revision = change['revision']['new']
+        # Colons are invalid in most filenames.
+        filename = f"{username}_{new_revision}".replace(":", "-")
+        if config.LOG_LEVEL:
+            log_revid(new_revision)
+        if config.LOG_LEVEL == 2:
+            flaglog.append({'filter': filter_.name,
+                            'change': change,
+                            'log': {'folder': None,
+                                    'file': None}})
+        elif config.LOG_LEVEL == 3:
+            log_content(
+                folder,
+                filename,
+                f"{filter_.name}\n\n{message}\n\n{change}\n\n{text}"
+            )
+            flaglog.append({'filter': filter_.name,
+                            'change': change,
+                            'log': {'folder': folder,
+                                    'file': filename}})
 
 
 def get_text(api: str, revision: int) -> str:
@@ -233,56 +249,5 @@ def log_content(folder: str, filename: str, content: str) -> None:
         f.write(content)
 
 
-def log_flagged_change(change: Change,
-                       changes_path: Optional[tuple[str, str]] = None,
-                       *,
-                       filtername: str) -> None:
-    """Log that a change has been flagged.
-
-    Args:
-      change:  A dict of the change, taken from the EventStream.
-      changes_path:  None or a tuple of two strs, representing the
-        folder and file to which a change was logged.
-      filtername:  The name of a Filter object.
-    """
-    log_path = f"{config.LOG_DIR}/{config.FLAGGED_CHANGES_LOG}"
-    with open(log_path, 'r', encoding='utf-8') as flaglog:
-        try:
-            data = json.load(flaglog)
-        except JSONDecodeError:
-            print(f"Failed to read {log_path}")
-            if not yesno("RESET ALL DATA? (y/n)  (If this is your first time "
-                         "running the Scanner at LOG_LEVEL 3, say 'y'.)"):
-                sys.exit()
-            data = []
-
-    entry: dict[str, Any] = {'filter': filtername, 'change': change}
-    if changes_path:
-        entry['log'] = {'folder': changes_path[0],
-                        'file': changes_path[1]}
-    data.append(entry)
-
-    assert data, "Something is terribly wrong."
-    with open(log_path, 'w', encoding='utf-8') as flaglog:
-        json.dump(data, flaglog, indent=4)
-
-
-def yesno(question: str) -> bool:
-    """Prompt a y/n question to the user
-
-    Arg:
-      question:  The question to ask
-
-    Returns:
-      bool
-    """
-    prompt = f'{question} '
-    ans = input(prompt).strip().lower()
-    if ans not in ('y', 'n'):
-        print(f'{ans} is invalid.  Please try again.')
-        return yesno(question)
-    return ans == 'y'
-
-
 if __name__ == '__main__':
-    run(*get_sys_args())
+    run(*_get_sys_args())

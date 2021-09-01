@@ -1,23 +1,8 @@
-"""Configuration data for `scanner`."""
+"""Filter objects for the scanner to use."""
+# COPY THIS TO THE MAIN DIRECTORY AND MODIFY AS NEEDED.
 import re
 
-from classes import Filter
-
-# 0:  Log nothing.
-# 1:  Log revids to `REVID_LOG`.
-# 2:  Also log flagged changes to `FLAGGED_CHANGES`.
-# 3:  Also log content of flagged changes to dated subfolder
-#     of `LOG_DIR`.
-LOG_LEVEL = 3
-# Main log directory.
-LOG_DIR = 'logs'
-# Subdirectory of `LOG_DIR` for copies of changes.
-CHANGES_SUBDIR = 'changes'
-# File in `LOG_DIR` to list metadata about flagged changes in.
-FLAGGED_CHANGES_LOG = 'flagged_changes.json'
-# File in `REVID_LOG` to list flagged revids in.
-REVID_LOG = 'revids.txt'
-
+from filter_ import Filter
 
 # See <https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams>
 # and <https://doc.wikimedia.org/pywikibot/master/api_ref/pywikibot.comms.html#module-pywikibot.comms.eventstreams>
@@ -27,10 +12,10 @@ REVID_LOG = 'revids.txt'
 # See <https://www.mediawiki.org/wiki/Help:Namespaces#Localisation> for
 # namespace numbers, or your wiki's internal documentation for ones
 # not listed there.
-filters = {i.name: i for i in [
+filterlist = {i.name: i for i in [
     # BEGIN FILTER LIST HERE.
     Filter(
-        name='minors',
+        name='example',
         # Not including "https://"
         sites=["en.wikipedia.org"],
         streamfilter={'type': ('edit', 'create'),
@@ -43,8 +28,8 @@ filters = {i.name: i for i in [
         # increases linearly with this list.  If a regex takes no flags,
         # use a 0 as the tuple's second value.
         regexes=[
-            (r"\buserbox(e[ns])?\b", re.I),
-            (r"some other regex; use 0 for no flags", 0)
+            re.compile(r"\buserbox(e[ns])?\b", re.I),
+            re.compile(r"some other regex")
         ]
     )
     # END FILTER LIST HERE.

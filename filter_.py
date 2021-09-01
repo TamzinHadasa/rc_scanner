@@ -1,46 +1,12 @@
-"""Holds classes for use elsewhere."""
+"""Holds Filter class."""
 import re
-from typing import Any, Callable, Optional, TypedDict
+from typing import Any, Optional
 
 from pywikibot.comms.eventstreams import EventStreams
 
-
-class QueryRaceCondition(Exception):
-    """Error for race conditions while querying the API."""
-
-
-class Meta(TypedDict):
-    """Structure of Change.meta."""
-    domain: str
-    partition: int
-    uri: str
-    offset: int
-    topic: str
-    request_id: str
-    schema_uri: str
-    dt: str
-    id: str
-
-
-class Change(TypedDict):
-    """Structure of a change in the EventStream."""
-    comment: str
-    wiki: str
-    type: str
-    server_name: str
-    server_script_path: str
-    namespace: int
-    title: str
-    bot: bool
-    server_url: str
-    length: dict[str, int]
-    meta: Meta
-    user: str
-    timestamp: int
-    patrolled: bool
-    id: int
-    minor: bool
-    revision: dict[str, int]
+import config
+from utils import ConfigError
+import flaglog
 
 
 class Filter:  # pylint: disable=too-many-instance-attributes
@@ -55,12 +21,14 @@ class Filter:  # pylint: disable=too-many-instance-attributes
     """
 
     def __init__(self,  # pylint: disable=too-many-arguments
+                 *,
                  name: str,
                  sites: list[str],
                  streamfilter: dict[str, Any],
                  streams: list[str],
                  max_edits: Optional[int],
-                 regexes: list[tuple[str, re.RegexFlag | int]]) -> None:
+                 regexes: list[re.Pattern[str]],
+                 skip_repeats: bool = config.LOG_LEVEL >= 2) -> None:
         """Initialize a Filter.
 
         Args:
@@ -77,24 +45,56 @@ class Filter:  # pylint: disable=too-many-instance-attributes
             that will compile to a regex and the second is a regex flag
             or a sum thereof.
         """
+        if skip_repeats and config.LOG_LEVEL < 2:
+            raise ConfigError("`skip_repeats` can only be set to True if "
+                              "`config.LOG_LEVEL` is >= 2")
         self.name = name
         self.apis = {i: f"https://{i}/w/api.php?" for i in sites}
         streamfilter['server_name'] = sites
         self.max_edits = max_edits
-        # Avoid checking if `max_edits` is None on every comparison.
-        self._compare_count = (lambda editcount: editcount <= self.max_edits)
-        self.compare_count: Callable[[int], bool] = (
-            (lambda x: True) if max_edits is None else self._compare_count
-        )
         self._streamfilter = streamfilter
         self._streams = streams
-        self._regexes = [re.compile(i, flags=j) for i, j in regexes]
+        self._regexes = regexes
+        self._skip_repeats = skip_repeats
 
     def __repr__(self) -> str:
-        return (f"Filter({self._streamfilter['server_name']}, "
-                + str({k: v for k, v in self._streamfilter.items()
-                       if k != 'server_name'})
-                + f", {self._streams}, {self._regexes})")
+        sites = self._streamfilter['server_name']
+        streamfilter = {k: v for k, v in self._streamfilter.items()
+                        if k != 'server_name'}
+        return ("Filter("
+                + ", ".join(repr(i) for i in [
+                    self.name, sites, streamfilter, self._streams,
+                    self.max_edits, self._regexes, self._skip_repeats
+                ])
+                + ")")
+
+    def count_under_max(self, editcount: int) -> bool:
+        """Compare an edit count to `max_edits`.
+
+        If `max_edits` is None, always returns True.
+
+        Arg:
+          editcount:  An int of a user's edit count.
+
+        Returns:
+          A bool, with True indicating either that the edit count was
+          under `max_edits`, or that `max_edits` is None.
+        """
+        return self.max_edits is None or editcount <= self.max_edits
+
+    def page_is_repeat(self, pagename: str) -> bool:
+        """Check whether a page is already in the flagged changes log.
+
+        If `_skip_repeats` is False, always returns False.
+
+        Arg:
+          pagename:  A page's name.
+
+        Returns:
+          A bool, with True indicating either that the page is in the
+          flagged changes log or that `skip_repeats` is False."""
+        return (self._skip_repeats
+                and pagename in [i['change']['title'] for i in flaglog.read()])
 
     def create_stream(self) -> EventStreams:
         """Create an EventStreams object from the Filter's attributes."""
